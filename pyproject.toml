@@ -1,0 +1,38 @@
+[build-system]
+requires=["setuptools"]
+
+[project]
+name = "RAG_researcher"
+version = "1.0.0"
+description = "A RAG pipeline for "
+
+dependencies = [
+    "requests",
+    "langchain",
+    "langchain_community",
+    "langgraph",
+    "langchain-openai",
+    "langchain_postgres",
+    "langchain-google-genai",
+    "psycopg_binary",
+    "google",
+    "google-genai",
+    "google-generativeai",
+    "psycopg2-binary",
+    "pgvector",
+    "flask_cors"
+]
+
+authors = [
+  { name = "Juan Cardenas", email = "cardenas.juan5453@gmail.com" }
+]
+requires-python = "<=3.13"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+RAG-researcher = "RAG_researcher.core.rag_app:main"
