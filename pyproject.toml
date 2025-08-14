@@ -8,6 +8,7 @@ description = "A RAG pipeline for "
 
 dependencies = [
     "requests",
+    "feedparser",
     "langchain",
     "langchain_community",
     "langgraph",
