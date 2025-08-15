@@ -7,6 +7,9 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import START, StateGraph
 
+from RAG_researcher.utils import globals
+from RAG_researcher.utils.logger import rag_logger
+
 from langchain_postgres import PGVector
 from pgvector.psycopg import register_vector
 from langchain_openai import OpenAIEmbeddings
@@ -22,7 +25,8 @@ class RetrieveApiKey:
         print(f"Selected model: {self.model}")
         self.supported_models = {"gpt-4.1":  os.environ.get("OPENAI_API_KEY"),
                                  "gpt-5":  os.environ.get("OPENAI_API_KEY"),
-                                 "tinyllama":  os.environ.get("OPENAI_API_KEY"),         
+                                 "tinyllama":  os.environ.get("OPENAI_API_KEY"),
+                                 "gemma3:270m": os.environ.get("OPENAI_API_KEY"),         
                                  "sonar":    os.environ.get("PERPLEXITY_API_KEY"),
                                  "sonar-pro":os.environ.get("PERPLEXITY_API_KEY"),
                                  "sonar-deep-research":os.environ.get("PERPLEXITY_API_KEY"),
@@ -70,6 +74,9 @@ def initialize(model:str):
     elif "tinyllama" in model:
         # Allows dor querying the tinyllama model, you are hosting locally
         llm = Ollama(base_url="http://localhost:11434", model="tinyllama")
+    elif "gemma3:270m" in model:
+        # Allows dor querying the tinyllama model, you are hosting locally
+        llm = Ollama(base_url="http://localhost:11434", model="gemma3:270m")
     else:
         print("Please choose a supported model")
 
@@ -109,7 +116,7 @@ def index_data(vector_store, site):
 
     docs = loader.load()
     assert len(docs) == 1
-    docs[0].metadata["subject"] = "ML"
+    docs[0].metadata["subject"] = globals.subject_selected.lower()
     # docs[0].metadata["subject"] = "Physics"
 
     # What are the contents of the graph?
@@ -128,9 +135,58 @@ def index_data(vector_store, site):
     # if args.verbose:
         # print(document_ids[:3])
 
+def retrieve(state: State):
+    ''' 
+    First function that will run in the lang-chain,
+    applies meta data filtering on the vector store to ensure that the 
+    correct information is retrived
+
+    Args:
+        state: The State object that has the important parts of the lang-chain.
+    Returns:
+        A dictionary with the top k relevent documents based on a similarity search, filtered by subject selected.
+    '''
+    subject = {"subject": globals.subject_selected.lower()}
+    print("applying filter: ", subject)
+    # Retrieves question from user, and gives top k rrelevant responses to LLM for question answering, applies meta data filtering for more relevant answers
+    retrieved_docs = globals.vector_store.similarity_search(query=state["question"], k=5, filter=subject) # filter=None will filter by metadata stored, use for only retrieving specific countries, add to meta data
+    return {"context": retrieved_docs}
+
+# (Taken from https://python.langchain.com/docs/tutorials/rag/)
+def generate(state: State):
+    '''
+    Send a query to the LLM selected by passing it the relevant context (the document chunks retrieved in retrieve()
+    Stores the question, answer and context in the state object.
+
+    Args:
+        state: The State object that has the important parts of the lang-chain.
+    Returns:
+        A dictionary containing the 
+    '''
+    # Collecting the relevant content and sources to ensure that ONLY the relevant subject information is being used
+    docs_content = "\n\n".join(doc.page_content for doc in state["context"])
+    sources = "\n\n".join(str(index)+": "+str(doc.metadata) for index,  doc in enumerate(state["context"]))
+
+    # Where question is actually asked to the LLM
+    messages = globals.prompt.invoke({"question": state["question"], "context": docs_content})
+
+    rag_logger.info(f"Juan: {state['question']}\n")
+    response = globals.llm.invoke(messages)
+
+    if globals.llm_model == "tinyllama" or globals.llm_model == "gemma3:270m":
+        content = response
+    else:
+        content = response.content
+
+    rag_logger.info(f"{globals.llm_model}: {content}\n")
+    rag_logger.info(f"Context: \n{docs_content}\n")
+    rag_logger.info(f"Sources: \n{sources}\n")
 
 
-def get_rag_response(question: str, llm_model:str, subject:str) -> str:
+    return {"answer": content}
+
+
+def get_rag_response(question: str) -> str:
     """
     This function takes a user prompt, processes it through the RAG system,
     and returns the generated response.
@@ -143,66 +199,16 @@ def get_rag_response(question: str, llm_model:str, subject:str) -> str:
     """
 
     # List of sites that were
-    indexed_sites = ["",]
+    indexed_sites = [""]
     
     
-    
-    prompt, llm, vector_store = initialize(llm_model)
-
     # Define application steps
-    def retrieve(state: State):
-        ''' 
-        First function that will run in the lang-chain,
-        applies meta data filtering on the vector store to ensure that the 
-        correct information is retrived
-
-        Args:
-            state: The State object that has the important parts of the lang-chain.
-        Returns:
-            A dictionary with the top k relevent documents based on a similarity search, filtered by subject selected.
-        '''
-        subject = {"subject": subject.lower()}
-        print("applying filter: ", subject)
-        # Retrieves question from user, and gives top k rrelevant responses to LLM for question answering, applies meta data filtering for more relevant answers
-        retrieved_docs = vector_store.similarity_search(query=state["question"], k=5, filter=subject) # filter=None will filter by metadata stored, use for only retrieving specific countries, add to meta data
-        return {"context": retrieved_docs}
-    
-
-
-
-    # (Taken from https://python.langchain.com/docs/tutorials/rag/)
-    def generate(state: State):
-        '''
-        Send a query to the LLM selected by passing it the relevant context (the document chunks retrieved in retrieve()
-        Stores the question, answer and context in the state object.
-
-        Args:
-            state: The State object that has the important parts of the lang-chain.
-        Returns:
-            A dictionary containing the 
-        '''
-        # Collecting the relevant content and sources to ensure that ONLY the relevant subject information is being used
-        docs_content = "\n\n".join(doc.page_content for doc in state["context"])
-        sources = "\n\n".join(str(index)+": "+str(doc.metadata) for index,  doc in enumerate(state["context"]))
-
-        # Where question is actually asked to the LLM
-        messages = prompt.invoke({"question": state["question"], "context": docs_content})
-
-        custom_logger.info(f"Juan: {state['question']}\n")
-        response = llm.invoke(messages)
-        custom_logger.info(f"{llm_model}: {response.content}\n")
-        custom_logger.info(f"Context: \n{docs_content}\n")
-        custom_logger.info(f"Sources: \n{sources}\n")
-
-
-        return {"answer": response.content}
-
 
     site =""
 
     if site not in indexed_sites:
         print(f"Site {site} not found in database, will load it and parse for an answer to your question.")
-        index_data(vector_store, site)
+        index_data(globals.vector_store, site)
     else:
         print(f"Site {site} found in vector store, loading it..")
 
@@ -218,7 +224,7 @@ def get_rag_response(question: str, llm_model:str, subject:str) -> str:
     response = graph.invoke({"question": question})
     print(response["answer"])
 
-    print(f"Received prompt: {prompt}")
+    print(f"Received prompt: {question}")
 
     return response["answer"]
 # ---------------------------------

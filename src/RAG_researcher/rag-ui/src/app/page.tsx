@@ -9,19 +9,145 @@ interface Message {
   isUser: boolean;
 }
 
+// Simple ReactMarkdown-like renderer (since we can't import ReactMarkdown in this environment)
+const ReactMarkdown = ({ children, components }: { children: string, components?: any }) => {
+  const renderContent = () => {
+    let html = children;
+    
+    // Handle LaTeX-style math (inline: $...$, block: $$...$$)
+    html = html.replace(/\$\$([\s\S]*?)\$\$/g, '<div class="katex-display bg-gray-700 p-3 rounded-lg my-3 text-center overflow-x-auto">$1</div>');
+    html = html.replace(/\$([^$\n]+)\$/g, '<span class="katex-inline bg-gray-700 px-2 py-1 rounded text-blue-300">$1</span>');
+    
+    // Handle code blocks first (```language\ncode```)
+    html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre class="bg-gray-900 rounded-lg p-4 mb-3 overflow-x-auto border border-gray-600"><code class="text-gray-100 font-mono text-sm">$2</code></pre>');
+    html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-900 rounded-lg p-4 mb-3 overflow-x-auto border border-gray-600"><code class="text-gray-100 font-mono text-sm">$1</code></pre>');
+    
+    // Handle inline code (`code`)
+    html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-900 px-2 py-1 rounded text-blue-300 font-mono text-sm">$1</code>');
+    
+    // Handle headers (must be at start of line)
+    html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-bold mb-2 mt-4 text-white">$1</h3>');
+    html = html.replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold mb-3 mt-5 text-white">$1</h2>');
+    html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mb-4 mt-6 text-white">$1</h1>');
+    
+    // Handle bold text (**text** or __text__)
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-white">$1</strong>');
+    html = html.replace(/__(.*?)__/g, '<strong class="font-bold text-white">$1</strong>');
+    
+    // Handle italic text (*text* or _text_)
+    html = html.replace(/\*(.*?)\*/g, '<em class="italic text-gray-300">$1</em>');
+    html = html.replace(/_(.*?)_/g, '<em class="italic text-gray-300">$1</em>');
+    
+    // Handle strikethrough (~~text~~)
+    html = html.replace(/~~(.*?)~~/g, '<del class="line-through text-gray-400">$1</del>');
+    
+    // Handle links [text](url)
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer">$1</a>');
+    
+    // Handle unordered lists (- or * at start of line)
+    html = html.replace(/^[\*\-] (.*$)/gim, '<li class="text-white ml-4 mb-1">• $1</li>');
+    
+    // Handle ordered lists (1. at start of line)
+    let olCounter = 1;
+    html = html.replace(/^\d+\. (.*$)/gim, (match, content) => {
+      const result = `<li class="text-white ml-4 mb-1">${olCounter}. ${content}</li>`;
+      olCounter++;
+      return result;
+    });
+    
+    // Handle blockquotes (> at start of line)
+    html = html.replace(/^> (.*$)/gim, '<blockquote class="border-l-4 border-blue-500 pl-4 py-2 mb-3 text-gray-300 italic bg-gray-800 rounded-r-lg">$1</blockquote>');
+    
+    // Handle horizontal rules (--- or ***)
+    html = html.replace(/^(---|\*\*\*)$/gim, '<hr class="border-gray-600 my-4">');
+    
+    // Handle tables (basic support for |col1|col2|)
+    html = html.replace(/\|(.+)\|/g, (match, content) => {
+      const cells = content.split('|').map((cell: string) => cell.trim());
+      const cellsHtml = cells.map((cell: string) => `<td class="border border-gray-600 px-3 py-2">${cell}</td>`).join('');
+      return `<tr>${cellsHtml}</tr>`;
+    });
+    
+    // Wrap table rows in table
+    html = html.replace(/(<tr>.*<\/tr>)/s, '<div class="overflow-x-auto mb-3"><table class="min-w-full border border-gray-600 rounded-lg">$1</table></div>');
+    
+    // Handle line breaks - convert double newlines to paragraph breaks
+    html = html.replace(/\n\n+/g, '</p><p class="mb-3 leading-relaxed text-white">');
+    html = html.replace(/\n/g, '<br />');
+    
+    // Wrap in paragraph tags if not already wrapped in block elements
+    if (!html.includes('<p') && !html.includes('<h') && !html.includes('<pre') && !html.includes('<blockquote') && !html.includes('<li')) {
+      html = `<p class="mb-3 leading-relaxed text-white">${html}</p>`;
+    } else if (!html.startsWith('<')) {
+      html = `<p class="mb-3 leading-relaxed text-white">${html}`;
+    }
+    
+    // Clean up any unclosed paragraph tags
+    if (html.includes('<p class="mb-3 leading-relaxed text-white">') && !html.includes('</p>')) {
+      html += '</p>';
+    }
+    
+    return html;
+  };
+
+  return (
+    <div 
+      className="markdown-content text-white prose prose-invert max-w-none" 
+      dangerouslySetInnerHTML={{ __html: renderContent() }}
+    />
+  );
+};
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    // Demo message showing various markdown features
+    {
+      text: `# Welcome to RAG Researcher!
+
+Here's a demonstration of **markdown formatting**:
+
+## Code Examples
+Here's some Python code:
+\`\`\`python
+def calculate_accuracy(predictions, labels):
+    correct = sum(p == l for p, l in zip(predictions, labels))
+    return correct / len(labels)
+\`\`\`
+
+And some inline code: \`numpy.array([1, 2, 3])\`
+
+## Mathematical Expressions
+You can write inline math like $E = mc^2$ and display math:
+$$\\frac{d}{dx}\\int_{a}^{x} f(t) dt = f(x)$$
+
+## Lists and Formatting
+- **Bold text** and *italic text*
+- ~~Strikethrough text~~
+- [External links](https://example.com)
+
+### Numbered Lists
+1. First item with **bold**
+2. Second item with *emphasis*
+3. Third item with \`code\`
+
+> This is a blockquote with important information about the research paper.
+
+---
+
+Ready to start asking questions about your documents!`,
+      isUser: false
+    }
+  ]);
   const [prompt, setPrompt] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   
   // --- State for the selected LLM ---
-  const [selectedLlm, setSelectedLlm] = useState<string>('gemini-2.5-flash');
+  const [selectedLlm, setSelectedLlm] = useState<string>('gemma3:270m');
   // ---------------------------------
 
   // --- State for the selected Subject ---
   const [selectedSubject, setSelectedSubject] = useState<string>('ML');
   // ---------------------------------
-
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -32,7 +158,7 @@ export default function ChatPage() {
         const response = await fetch('http://127.0.0.1:5000/api/llm');
         if (response.ok) {
           const data = await response.json();
-          setSelectedLlm(data.llm || 'gemini-2.5-flash');
+          setSelectedLlm(data.llm || 'gemma3:270m');
         }
       } catch (error) {
         console.error("Could not fetch initial LLM:", error);
@@ -58,7 +184,6 @@ export default function ChatPage() {
     fetchInitialSubject();
   }, []);
   // ------------------------------------
-
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -88,7 +213,7 @@ export default function ChatPage() {
   };
   // ----------------------------------------------------
 
-  // --- Function to Handle LLM Change from Dropdown ---
+  // --- Function to Handle Subject Change from Dropdown ---
   const handlesubjectChange = async (e: ChangeEvent<HTMLSelectElement>) => {
     const newSubject = e.target.value;
     console.log(`Changing subject to: ${newSubject}`);
@@ -110,10 +235,9 @@ export default function ChatPage() {
   };
   // ----------------------------------------------------
 
-
   // Function to handle form submission
-  const handleSend = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSend = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
     if (!prompt.trim() || isLoading) return;
 
     const userMessage: Message = { text: prompt, isUser: true };
@@ -132,6 +256,7 @@ export default function ChatPage() {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
       const data = await response.json();
+      
       const botMessage: Message = { text: data.response, isUser: false };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
 
@@ -144,12 +269,20 @@ export default function ChatPage() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   const llmOptions = ['gemini-2.5-flash', 'gemini-2.5-pro', 
                       'gpt-4.1', 'gpt-o4-mini', 
                       'tinyllama',
+                      'gemma3:270m',
                       'claude-sonnet-4-20250514','claude-opus-4-20250514','claude-3-5-haiku-20241022'];
 
-  const subjectOptions = ["test","ML", "Physics", "Math", "Chemistry"]
+  const subjectOptions = ["test", "ML", "Physics", "Math", "Chemistry"]
 
   return (
     <div className="flex h-screen bg-gray-900 text-white font-sans">
@@ -192,7 +325,7 @@ export default function ChatPage() {
               id="llm-select"
               value={selectedLlm}
               onChange={handleLlmChange}
-              className="w-full p-2 rounded-md bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-2 rounded-md bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-2 focus:ring-blue-500"
             >
               {llmOptions.map((option) => (
                 <option key={option} value={option}>
@@ -217,7 +350,11 @@ export default function ChatPage() {
               <div key={index} className={`my-4 flex items-start gap-4 ${message.isUser ? 'justify-end' : ''}`}>
                 {!message.isUser && <div className="p-2 bg-gray-700 rounded-full"><Bot size={20} /></div>}
                 <div className={`p-4 rounded-lg max-w-2xl ${message.isUser ? 'bg-blue-600' : 'bg-gray-800'}`}>
-                  <p>{message.text}</p>
+                  {message.isUser ? (
+                    <div className="whitespace-pre-wrap text-white">{message.text}</div>
+                  ) : (
+                    <ReactMarkdown>{message.text}</ReactMarkdown>
+                  )}
                 </div>
                 {message.isUser && <div className="p-2 bg-gray-700 rounded-full"><User size={20} /></div>}
               </div>
@@ -237,25 +374,25 @@ export default function ChatPage() {
           )}
         </div>
         <div className="p-4 bg-gray-950 border-t border-gray-700">
-          <form onSubmit={handleSend} className="max-w-3xl mx-auto">
+          <div className="max-w-3xl mx-auto">
             <div className="relative">
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { handleSend(e); } }}
+                onKeyDown={handleKeyDown}
                 placeholder="Ask anything about the selected paper..."
                 className="w-full bg-gray-800 border border-gray-600 rounded-lg p-4 pr-16 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 rows={1}
               />
               <button
-                type="submit"
+                onClick={handleSend}
                 disabled={isLoading || !prompt.trim()}
                 className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
               >
                 <SendHorizonal size={20} />
               </button>
             </div>
-          </form>
+          </div>
         </div>
       </div>
     </div>
